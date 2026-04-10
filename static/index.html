@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>BMTC Live Tracker — Bangalore</title>
+  <meta name="description" content="24/7 live BMTC bus tracker for Bangalore with Lazy Cyclist score." />
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ─── RESET & BASE ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-dark:        #0b0f1a;
+      --bg-card:        rgba(13, 18, 30, 0.92);
+      --bg-card-hover:  rgba(20, 27, 45, 0.96);
+      --border:         rgba(99, 179, 237, 0.15);
+      --border-bright:  rgba(99, 179, 237, 0.35);
+      --accent-blue:    #63b3ed;
+      --accent-green:   #48bb78;
+      --accent-amber:   #f6ad55;
+      --accent-red:     #fc8181;
+      --text-primary:   #e2e8f0;
+      --text-secondary: #94a3b8;
+      --text-muted:     #4a5568;
+      --user-dot:       #63b3ed;
+      --bus-dot:        #48bb78;
+      --pulse-color:    rgba(72, 187, 120, 0.6);
+
+      --card-blur:      blur(20px);
+      --radius-lg:      16px;
+      --radius-md:      10px;
+      --radius-sm:      6px;
+      --shadow-glow:    0 0 30px rgba(99, 179, 237, 0.08);
+      --transition:     all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    html, body {
+      height: 100%;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--bg-dark);
+      color: var(--text-primary);
+      overflow: hidden;
+    }
+
+    /* ─── MAP ─────────────────────────────────────────────────────── */
+    #map {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+    }
+
+    /* Override Leaflet controls to match dark theme */
+    .leaflet-control-zoom a,
+    .leaflet-control-attribution {
+      background: var(--bg-card) !important;
+      color: var(--text-secondary) !important;
+      border-color: var(--border) !important;
+      backdrop-filter: var(--card-blur);
+    }
+    .leaflet-control-zoom a:hover { background: var(--bg-card-hover) !important; }
+    .leaflet-control-attribution { font-size: 9px !important; }
+    .leaflet-control-attribution a { color: var(--accent-blue) !important; }
+
+    /* ─── TOP BAR ─────────────────────────────────────────────────── */
+    #topbar {
+      position: absolute;
+      top: 16px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 20px;
+      background: var(--bg-card);
+      backdrop-filter: var(--card-blur);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      box-shadow: var(--shadow-glow);
+      white-space: nowrap;
+    }
+
+    #topbar .logo {
+      font-size: 18px;
+    }
+
+    #topbar .title {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: var(--text-primary);
+    }
+
+    #topbar .divider {
+      width: 1px; height: 16px;
+      background: var(--border);
+    }
+
+    #topbar .live-badge {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--accent-green);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .live-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--accent-green);
+      animation: live-pulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes live-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.7); }
+    }
+
+    /* ─── ROUTE SELECTOR ──────────────────────────────────────────── */
+    #route-selector {
+      position: absolute;
+      top: 72px; left: 16px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .route-chip {
+      padding: 8px 16px;
+      background: var(--bg-card);
+      backdrop-filter: var(--card-blur);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: var(--transition);
+      box-shadow: var(--shadow-glow);
+      user-select: none;
+    }
+
+    .route-chip:hover {
+      border-color: var(--border-bright);
+      color: var(--text-primary);
+    }
+
+    .route-chip.active {
+      background: rgba(72, 187, 120, 0.15);
+      border-color: rgba(72, 187, 120, 0.5);
+      color: var(--accent-green);
+    }
+
+    /* ─── STATS PANEL (top-right) ─────────────────────────────────── */
+    #stats-panel {
+      position: absolute;
+      top: 72px; right: 16px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-width: 150px;
+    }
+
+    .stat-chip {
+      padding: 8px 14px;
+      background: var(--bg-card);
+      backdrop-filter: var(--card-blur);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      font-size: 11px;
+      color: var(--text-secondary);
+      box-shadow: var(--shadow-glow);
+    }
+
+    .stat-chip .stat-label { margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.07em; font-size: 9px; }
+
+    .stat-chip .stat-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+
+    /* ─── RECOMMENDATION CARD (bottom) ───────────────────────────── */
+    #rec-card {
+      position: absolute;
+      bottom: 24px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      width: min(480px, calc(100vw - 32px));
+      background: var(--bg-card);
+      backdrop-filter: var(--card-blur);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-glow), 0 24px 48px rgba(0,0,0,0.5);
+      overflow: hidden;
+      transition: var(--transition);
+    }
+
+    #rec-card:hover {
+      border-color: var(--border-bright);
+      box-shadow: 0 0 40px rgba(99, 179, 237, 0.12), 0 24px 48px rgba(0,0,0,0.5);
+    }
+
+    /* Colored accent bar on top of the card */
+    #card-accent-bar {
+      height: 3px;
+      width: 100%;
+      background: linear-gradient(90deg, var(--accent-green), var(--accent-blue));
+      transition: background 0.6s ease;
+    }
+
+    #rec-card .card-body { padding: 20px; }
+
+    /* Top row: emoji verdict + score circle */
+    .card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
+
+    .card-verdict {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .card-emoji { font-size: 28px; line-height: 1; }
+
+    .card-verdict-text {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-primary);
+      line-height: 1.3;
+    }
+
+    /* Lazy Score dial */
+    .score-dial {
+      position: relative;
+      width: 72px; height: 72px;
+      flex-shrink: 0;
+    }
+
+    .score-dial svg {
+      width: 100%; height: 100%;
+      transform: rotate(-90deg);
+    }
+
+    .score-dial .dial-bg {
+      fill: none;
+      stroke: rgba(255,255,255,0.06);
+      stroke-width: 5;
+    }
+
+    .score-dial .dial-fill {
+      fill: none;
+      stroke: var(--accent-green);
+      stroke-width: 5;
+      stroke-linecap: round;
+      stroke-dasharray: 188.5;  /* 2π × 30 */
+      stroke-dashoffset: 188.5; /* Start at 0, JS animates this */
+      transition: stroke-dashoffset 0.8s cubic-bezier(0.4, 0, 0.2, 1),
+                  stroke 0.5s ease;
+    }
+
+    .score-dial .dial-value {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .score-dial .dial-number {
+      font-size: 19px;
+      font-weight: 500;
+      color: var(--text-primary);
+      line-height: 1;
+    }
+
+    .score-dial .dial-label {
+      font-size: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* Details row: pills */
+    .card-details {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .detail-pill {
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: var(--radius-sm);
+      text-align: center;
+    }
+
+    .detail-pill .pill-icon { font-size: 16px; margin-bottom: 4px; }
+    .detail-pill .pill-label { font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .detail-pill .pill-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-primary);
+      margin-top: 2px;
+    }
+
+    /* Footer strip */
+    .card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    #last-updated { font-family: 'JetBrains Mono', monospace; }
+
+    /* ─── LOADING OVERLAY ─────────────────────────────────────────── */
+    #loading-overlay {
+      position: absolute;
+      inset: 0; z-index: 2000;
+      background: var(--bg-dark);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      transition: opacity 0.6s ease;
+    }
+
+    #loading-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid rgba(99, 179, 237, 0.15);
+      border-top-color: var(--accent-blue);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-text {
+      font-size: 13px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    /* ─── BUS MARKER (custom Leaflet DivIcon) ─────────────────────── */
+    .bus-marker-wrap {
+      position: relative;
+      width: 20px; height: 20px;
+    }
+
+    /* The outer pulsing ring */
+    .bus-pulse-ring {
+      position: absolute;
+      inset: -6px;
+      border-radius: 50%;
+      background: var(--pulse-color);
+      animation: pulse-ring 2s ease-out infinite;
+    }
+
+    /* Pulse speed classes — injected by JS based on distance */
+    .bus-pulse-ring.fast   { animation-duration: 0.8s; }
+    .bus-pulse-ring.medium { animation-duration: 1.5s; }
+    .bus-pulse-ring.slow   { animation-duration: 3.0s; }
+
+    @keyframes pulse-ring {
+      0%   { transform: scale(0.6); opacity: 0.9; }
+      100% { transform: scale(2.2); opacity: 0; }
+    }
+
+    /* The solid bus dot */
+    .bus-dot {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: var(--bus-dot);
+      border: 2px solid rgba(255,255,255,0.9);
+      box-shadow: 0 0 8px rgba(72, 187, 120, 0.7);
+      z-index: 1;
+    }
+
+    /* ─── USER MARKER ─────────────────────────────────────────────── */
+    .user-marker-wrap {
+      position: relative;
+      width: 18px; height: 18px;
+    }
+
+    .user-pulse-ring {
+      position: absolute;
+      inset: -8px;
+      border-radius: 50%;
+      background: rgba(99, 179, 237, 0.4);
+      animation: pulse-ring 2.5s ease-out infinite;
+    }
+
+    .user-dot {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: var(--user-dot);
+      border: 2.5px solid white;
+      box-shadow: 0 0 12px rgba(99, 179, 237, 0.8);
+      z-index: 1;
+    }
+
+    /* ─── SCORE COLOR TRANSITIONS ─────────────────────────────────── */
+    /* Applied to the accent bar and dial via JS */
+    .score-high   { --score-color: var(--accent-green); }
+    .score-medium { --score-color: var(--accent-amber); }
+    .score-low    { --score-color: var(--accent-red);   }
+  </style>
+</head>
+<body>
+
+<!-- Loading overlay shown until map tiles load -->
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <div class="loading-text">Connecting to Bangalore transit network…</div>
+</div>
+
+<!-- Map container -->
+<div id="map"></div>
+
+<!-- Top bar -->
+<div id="topbar">
+  <span class="logo">🚌</span>
+  <span class="title">BMTC Live Tracker</span>
+  <div class="divider"></div>
+  <div class="live-badge">
+    <div class="live-dot"></div>
+    <span>Live</span>
+  </div>
+</div>
+
+<!-- Route selector (left) -->
+<div id="route-selector">
+  <div class="route-chip active" data-route="500-D" id="chip-500-D">🟢 500-D</div>
+  <div class="route-chip"       data-route="335-E" id="chip-335-E">🟢 335-E</div>
+</div>
+
+<!-- Stats panel (right) -->
+<div id="stats-panel">
+  <div class="stat-chip">
+    <div class="stat-label">Buses tracked</div>
+    <div class="stat-value" id="stat-buses">—</div>
+  </div>
+  <div class="stat-chip">
+    <div class="stat-label">Nearest bus</div>
+    <div class="stat-value" id="stat-nearest">—</div>
+  </div>
+  <div class="stat-chip">
+    <div class="stat-label">Traffic mult.</div>
+    <div class="stat-value" id="stat-traffic">—</div>
+  </div>
+</div>
+
+<!-- Recommendation card (bottom) -->
+<div id="rec-card">
+  <div id="card-accent-bar"></div>
+  <div class="card-body">
+    <div class="card-top">
+      <div class="card-verdict">
+        <div class="card-emoji" id="card-emoji">🔄</div>
+        <div class="card-verdict-text" id="card-verdict">Loading bus data…</div>
+      </div>
+      <!-- SVG dial — r=30, circumference = 2π×30 ≈ 188.5 -->
+      <div class="score-dial">
+        <svg viewBox="0 0 72 72">
+          <circle class="dial-bg"   cx="36" cy="36" r="30"/>
+          <circle class="dial-fill" cx="36" cy="36" r="30" id="dial-fill"/>
+        </svg>
+        <div class="dial-value">
+          <span class="dial-number" id="dial-number">—</span>
+          <span class="dial-label">score</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card-details">
+      <div class="detail-pill">
+        <div class="pill-icon">📍</div>
+        <div class="pill-label">Distance</div>
+        <div class="pill-value" id="pill-distance">—</div>
+      </div>
+      <div class="detail-pill">
+        <div class="pill-icon">⏱️</div>
+        <div class="pill-label">ETA</div>
+        <div class="pill-value" id="pill-eta">—</div>
+      </div>
+      <div class="detail-pill">
+        <div class="pill-icon">🚦</div>
+        <div class="pill-label">Traffic</div>
+        <div class="pill-value" id="pill-traffic">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="card-footer">
+    <span>Route: <strong id="footer-route">500-D</strong></span>
+    <span id="last-updated">—</span>
+  </div>
+</div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+<script>
+'use strict';
+// ═══════════════════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════════════════
+
+// FastAPI backend base URL — auto-detect: use same origin in production,
+// or localhost:8000 when opening file directly.
+const API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? 'http://localhost:8000'
+  : '';
+
+const POLL_INTERVAL_MS = 15_000;  // 15 seconds
+
+// IIITB area, Bangalore — the center of the universe
+const IIITB_LAT = 12.9449;
+const IIITB_LON = 77.6069;
+
+// Distance thresholds for pulse speed (meters)
+const PULSE_FAST   = 500;
+const PULSE_MEDIUM = 1500;
+
+// ═══════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════
+let activeRoute  = '500-D';
+let userLat      = IIITB_LAT;
+let userLon      = IIITB_LON;
+let userLocKnown = false;
+let busMarkers   = {};  // keyed by a unique bus id (index)
+let userMarker   = null;
+let pollTimer    = null;
+
+// ═══════════════════════════════════════════════════════════════════
+// MAP INITIALISATION
+// ═══════════════════════════════════════════════════════════════════
+const map = L.map('map', {
+  center:  [IIITB_LAT, IIITB_LON],
+  zoom:    14,
+  zoomControl: true,
+  attributionControl: true,
+});
+
+// Dark tile layer — CartoDB Dark Matter (free, no key needed)
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+  subdomains: 'abcd',
+  maxZoom: 19,
+}).addTo(map);
+
+// Hide loading overlay once tiles start loading
+map.once('load', () => {
+  document.getElementById('loading-overlay').classList.add('hidden');
+});
+// Fallback: hide after 2 seconds regardless
+setTimeout(() => {
+  document.getElementById('loading-overlay').classList.add('hidden');
+}, 2000);
+
+// ═══════════════════════════════════════════════════════════════════
+// CUSTOM ICONS (DivIcon — CSS-animated)
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Build a bus marker icon. Pulse speed depends on distance to user.
+ * @param {number} distanceM - Distance from user in meters (or null)
+ */
+function busIcon(distanceM) {
+  let speedClass = 'slow';
+  if (distanceM !== null && distanceM <= PULSE_FAST)        speedClass = 'fast';
+  else if (distanceM !== null && distanceM <= PULSE_MEDIUM) speedClass = 'medium';
+
+  return L.divIcon({
+    className: '',
+    html: `
+      <div class="bus-marker-wrap">
+        <div class="bus-pulse-ring ${speedClass}"></div>
+        <div class="bus-dot"></div>
+      </div>
+    `,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
+    popupAnchor: [0, -14],
+  });
+}
+
+/** User "You Are Here" marker. */
+function userIcon() {
+  return L.divIcon({
+    className: '',
+    html: `
+      <div class="user-marker-wrap">
+        <div class="user-pulse-ring"></div>
+        <div class="user-dot"></div>
+      </div>
+    `,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// GEOLOCATION — USER POSITION
+// ═══════════════════════════════════════════════════════════════════
+
+function updateUserMarker(lat, lon) {
+  if (!userMarker) {
+    userMarker = L.marker([lat, lon], { icon: userIcon(), zIndexOffset: 1000 })
+      .addTo(map)
+      .bindPopup('📍 You Are Here');
+  } else {
+    // Glide the marker to new position using CSS transitions via setLatLng
+    userMarker.setLatLng([lat, lon]);
+  }
+}
+
+function tryGeolocation() {
+  if (!navigator.geolocation) return;
+
+  navigator.geolocation.watchPosition(
+    pos => {
+      userLat      = pos.coords.latitude;
+      userLon      = pos.coords.longitude;
+      userLocKnown = true;
+      updateUserMarker(userLat, userLon);
+    },
+    _err => {
+      // Permission denied or unavailable — use IIITB as default silently
+      updateUserMarker(IIITB_LAT, IIITB_LON);
+    },
+    { enableHighAccuracy: true, maximumAge: 10_000, timeout: 20_000 }
+  );
+}
+
+tryGeolocation();
+
+// ═══════════════════════════════════════════════════════════════════
+// UTILS — HAVERSINE (JS mirror of the Python one)
+// ═══════════════════════════════════════════════════════════════════
+function haversineM(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2
+    + Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) * Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function fmtDistance(m) {
+  return m >= 1000 ? `${(m/1000).toFixed(1)} km` : `${Math.round(m)} m`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BUS MARKERS — CREATE / GLIDE / REMOVE
+// ═══════════════════════════════════════════════════════════════════
+
+/**
+ * Smoothly animate a Leaflet marker to a new position.
+ * Leaflet doesn't natively tween, but we can do it with requestAnimationFrame.
+ */
+function glideMarker(marker, toLat, toLon, durationMs = 2000) {
+  const from = marker.getLatLng();
+  const start = performance.now();
+
+  function step(now) {
+    const t = Math.min(1, (now - start) / durationMs);
+    // Ease-in-out cubic
+    const e = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+    const lat = from.lat + (toLat - from.lat) * e;
+    const lon = from.lng + (toLon - from.lng) * e;
+    marker.setLatLng([lat, lon]);
+    if (t < 1) requestAnimationFrame(step);
+  }
+
+  requestAnimationFrame(step);
+}
+
+/**
+ * Refresh all bus markers on the map given an array of position objects.
+ * New buses get new markers, existing buses glide to their new positions.
+ */
+function refreshBusMarkers(buses) {
+  const seen = new Set();
+
+  buses.forEach((bus, idx) => {
+    const key = `bus-${idx}`;
+    seen.add(key);
+
+    const dist = haversineM(userLat, userLon, bus.lat, bus.lon);
+
+    if (!busMarkers[key]) {
+      // New bus — create marker
+      const marker = L.marker([bus.lat, bus.lon], {
+        icon: busIcon(dist),
+        zIndexOffset: 500,
+      }).addTo(map);
+
+      marker.bindPopup(`
+        <strong>Route ${activeRoute}</strong><br/>
+        🚌 Distance: <strong>${fmtDistance(dist)}</strong>
+      `);
+
+      busMarkers[key] = marker;
+    } else {
+      // Existing bus — glide to new position and refresh icon
+      glideMarker(busMarkers[key], bus.lat, bus.lon);
+      busMarkers[key].setIcon(busIcon(dist));
+      busMarkers[key].setPopupContent(`
+        <strong>Route ${activeRoute}</strong><br/>
+        🚌 Distance: <strong>${fmtDistance(dist)}</strong>
+      `);
+    }
+  });
+
+  // Remove stale markers (buses that disappeared from the feed)
+  Object.keys(busMarkers).forEach(key => {
+    if (!seen.has(key)) {
+      map.removeLayer(busMarkers[key]);
+      delete busMarkers[key];
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SCORE CARD RENDERING
+// ═══════════════════════════════════════════════════════════════════
+const DIAL_CIRC = 188.5; // 2π × 30
+
+function renderScoreCard(data) {
+  const score   = data.lazy_score ?? 0;
+  const verdict = data.verdict    ?? '—';
+  const emoji   = data.emoji      ?? '🤔';
+  const bd      = data.breakdown  ?? {};
+  const dist    = bd.distance;
+  const eta     = bd.eta;
+  const traffic = bd.traffic;
+
+  // Dial fill
+  const fill   = document.getElementById('dial-fill');
+  const offset = DIAL_CIRC - (score / 100) * DIAL_CIRC;
+  fill.style.strokeDashoffset = offset;
+
+  // Dial color: green ≥ 70, amber 40–69, red < 40
+  const color = score >= 70
+    ? 'var(--accent-green)'
+    : score >= 40
+      ? 'var(--accent-amber)'
+      : 'var(--accent-red)';
+  fill.style.stroke = color;
+
+  // Accent bar on the card
+  const barColors = score >= 70
+    ? 'linear-gradient(90deg, var(--accent-green), #68d391)'
+    : score >= 40
+      ? 'linear-gradient(90deg, var(--accent-amber), #f6d860)'
+      : 'linear-gradient(90deg, var(--accent-red), #feb2b2)';
+  document.getElementById('card-accent-bar').style.background = barColors;
+
+  // Text
+  document.getElementById('dial-number').textContent = Math.round(score);
+  document.getElementById('card-emoji').textContent   = emoji;
+  document.getElementById('card-verdict').textContent = verdict;
+
+  // Details pills
+  if (dist) {
+    document.getElementById('pill-distance').textContent = fmtDistance(dist.nearest_bus_m);
+  }
+  if (eta) {
+    const etaMin = eta.minutes;
+    document.getElementById('pill-eta').textContent =
+      etaMin < 1 ? '< 1 min' : `${etaMin.toFixed(1)} min`;
+  }
+  if (traffic) {
+    document.getElementById('pill-traffic').textContent = `${traffic.multiplier}×`;
+    document.getElementById('stat-traffic').textContent = `${traffic.multiplier}×`;
+  }
+}
+
+function renderNoData() {
+  document.getElementById('dial-number').textContent  = '—';
+  document.getElementById('card-emoji').textContent   = '📡';
+  document.getElementById('card-verdict').textContent = 'No bus data for this route yet. Poller warming up…';
+  document.getElementById('pill-distance').textContent = '—';
+  document.getElementById('pill-eta').textContent      = '—';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// API POLLING
+// ═══════════════════════════════════════════════════════════════════
+
+function tsNow() {
+  return new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+async function poll() {
+  try {
+    // 1. Fetch lazy score (includes bus proximity + traffic multiplier)
+    const scoreRes = await fetch(
+      `${API_BASE}/api/v1/lazy-score?lat=${userLat}&lon=${userLon}&route=${activeRoute}`
+    );
+    const scoreData = await scoreRes.json();
+    renderScoreCard(scoreData);
+
+    // 2. Fetch raw bus positions for the markers
+    const busRes = await fetch(`${API_BASE}/api/v1/buses/${activeRoute}`);
+    const busRaw = await busRes.json();
+
+    // Normalize to array of {lat, lon}
+    let buses = [];
+    if (Array.isArray(busRaw)) {
+      buses = busRaw
+        .map(b => ({
+          lat: parseFloat(b.lat  ?? b.latitude  ?? b.vehicleLat ?? 0),
+          lon: parseFloat(b.lon  ?? b.lng        ?? b.longitude  ?? b.vehicleLon ?? 0),
+        }))
+        .filter(b => b.lat && b.lon);
+    } else if (busRaw?.data) {
+      buses = busRaw.data;
+    }
+
+    refreshBusMarkers(buses);
+    document.getElementById('stat-buses').textContent = buses.length || '0';
+
+    // Nearest bus distance for the stat chip
+    if (scoreData?.breakdown?.distance?.nearest_bus_m != null) {
+      document.getElementById('stat-nearest').textContent =
+        fmtDistance(scoreData.breakdown.distance.nearest_bus_m);
+    }
+
+    document.getElementById('last-updated').textContent = `Updated ${tsNow()}`;
+
+  } catch (err) {
+    console.warn('[BMTC] Poll error:', err);
+    document.getElementById('card-verdict').textContent = '⚠️ Cannot reach backend. Retrying…';
+    document.getElementById('last-updated').textContent = `Failed ${tsNow()}`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ROUTE SELECTOR
+// ═══════════════════════════════════════════════════════════════════
+
+document.querySelectorAll('.route-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    // Update active route
+    document.querySelectorAll('.route-chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    activeRoute = chip.dataset.route;
+
+    // Update card footer
+    document.getElementById('footer-route').textContent = activeRoute;
+
+    // Clear bus markers so stale buses from the old route vanish
+    Object.values(busMarkers).forEach(m => map.removeLayer(m));
+    busMarkers = {};
+
+    renderNoData();
+    poll();  // Immediate poll on route switch
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// START POLLING
+// ═══════════════════════════════════════════════════════════════════
+
+// Initial poll immediately
+poll();
+
+// Then every 15 seconds
+pollTimer = setInterval(poll, POLL_INTERVAL_MS);
+
+// Pause polling when tab is hidden, resume on visibility (battery-friendly)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    clearInterval(pollTimer);
+  } else {
+    poll();
+    pollTimer = setInterval(poll, POLL_INTERVAL_MS);
+  }
+});
+</script>
+</body>
+</html>
