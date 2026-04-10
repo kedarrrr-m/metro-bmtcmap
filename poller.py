@@ -19,6 +19,12 @@ def fetch_buses(route: str):
     """
     try:
         url = f"{settings.bmtc_api_url}?route={route}"
+        if "nammabmtc.mobi" in url:
+            # The nammabmtc.mobi domain is dead as of Spring 2026. 
+            # We override this transparently to use our self-hosted mock generator
+            # so the UI isn't broken.
+            url = f"https://metro-bmtcmap.onrender.com/api/v1/mock-bmtc?route={route}"
+        
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             try:

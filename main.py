@@ -136,6 +136,37 @@ async def get_buses_for_route(route: str):
     }
 
 
+import random
+
+@app.get("/api/v1/mock-bmtc")
+async def mock_bmtc_api(route: str = Query(...)):
+    """
+    Fallback mock endpoint for when the unofficial BMTC API is down.
+    Generates 3-5 fake buses along the requested route.
+    """
+    if not route_index:
+        return {"data": []}
+
+    # Find stops for this route
+    route_stops = [s for s in route_index if route.upper() in s["routes"]]
+    if not route_stops:
+        # Fallback to IIITB area if route not found
+        return {"data": [{"lat": 12.9449 + random.uniform(-0.02, 0.02), "lon": 77.6069 + random.uniform(-0.02, 0.02)} for _ in range(3)]}
+
+    buses = []
+    num_buses = random.randint(3, 8)
+    
+    # Pick random stops and place a bus slightly offset from them
+    sampled_stops = random.choices(route_stops, k=num_buses)
+    for stop in sampled_stops:
+        buses.append({
+            "lat": stop["lat"] + random.uniform(-0.005, 0.005),
+            "lon": stop["lon"] + random.uniform(-0.005, 0.005),
+            "route": route.upper()
+        })
+        
+    return {"data": buses}
+
 @app.get("/api/v1/lazy-score")
 async def get_lazy_score(
     lat: float = Query(..., description="Cyclist's latitude"),
