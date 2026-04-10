@@ -827,18 +827,27 @@ function tsNow() {
   return new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+async function safeJson(res) {
+  // Guard: only parse JSON if the server actually sent JSON.
+  // Render cold-start splash pages are text/html — this prevents
+  // "unexpected character" SyntaxErrors from crashing the poll loop.
+  const ct = res.headers.get('content-type') || '';
+  if (!res.ok || !ct.includes('application/json')) return null;
+  return res.json();
+}
+
 async function poll() {
   try {
     // 1. Fetch lazy score (includes bus proximity + traffic multiplier)
-    const scoreRes = await fetch(
+    const scoreRes  = await fetch(
       `${API_BASE}/api/v1/lazy-score?lat=${userLat}&lon=${userLon}&route=${activeRoute}`
     );
-    const scoreData = await scoreRes.json();
-    renderScoreCard(scoreData);
+    const scoreData = await safeJson(scoreRes);
+    if (scoreData) renderScoreCard(scoreData);
 
     // 2. Fetch raw bus positions for the markers
     const busRes = await fetch(`${API_BASE}/api/v1/buses/${activeRoute}`);
-    const busRaw = await busRes.json();
+    const busRaw = await safeJson(busRes);
 
     // Normalize to array of {lat, lon}
     let buses = [];
@@ -865,11 +874,12 @@ async function poll() {
     document.getElementById('last-updated').textContent = `Updated ${tsNow()}`;
 
   } catch (err) {
-    console.warn('[BMTC] Poll error:', err);
-    document.getElementById('card-verdict').textContent = '⚠️ Cannot reach backend. Retrying…';
-    document.getElementById('last-updated').textContent = `Failed ${tsNow()}`;
+    // Only log — don't update the card text so last good state stays visible
+    console.warn('[BMTC] Poll error:', err.message);
+    document.getElementById('last-updated').textContent = `Retrying… ${tsNow()}`;
   }
 }
+
 
 // ═══════════════════════════════════════════════════════════════════
 // ROUTE SELECTOR
