@@ -126,12 +126,67 @@
       50%       { opacity: 0.4; transform: scale(0.7); }
     }
 
-    /* ─── ROUTE SELECTOR ──────────────────────────────────────────── */
-    #route-selector {
+    /* ─── SEARCH PANEL (left) ──────────────────────────────────────────── */
+    #search-panel {
       position: absolute;
       top: 72px; left: 16px;
       z-index: 1000;
       display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 250px;
+    }
+
+    .search-inputs {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: var(--bg-card);
+      backdrop-filter: var(--card-blur);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 12px;
+      box-shadow: var(--shadow-glow);
+    }
+
+    .search-inputs input {
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
+      font-size: 13px;
+      outline: none;
+      transition: var(--transition);
+    }
+
+    .search-inputs input:focus {
+      border-color: var(--accent-blue);
+    }
+
+    .search-inputs button {
+      padding: 10px;
+      background: var(--accent-blue);
+      color: var(--bg-dark);
+      border: none;
+      border-radius: var(--radius-sm);
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .search-inputs button:hover {
+      background: #4299e1;
+    }
+    
+    .search-inputs button:disabled {
+      background: var(--text-muted);
+      cursor: not-allowed;
+    }
+
+    #route-selector {
+      display: none;
       flex-direction: column;
       gap: 8px;
     }
@@ -149,6 +204,7 @@
       transition: var(--transition);
       box-shadow: var(--shadow-glow);
       user-select: none;
+      text-align: center;
     }
 
     .route-chip:hover {
@@ -462,10 +518,16 @@
   </div>
 </div>
 
-<!-- Route selector (left) -->
-<div id="route-selector">
-  <div class="route-chip active" data-route="500-D" id="chip-500-D">🟢 500-D</div>
-  <div class="route-chip"       data-route="335-E" id="chip-335-E">🟢 335-E</div>
+<!-- Search Panel (left) -->
+<div id="search-panel">
+  <div class="search-inputs">
+    <input type="text" id="origin-input" placeholder="Origin (e.g. Indiranagar)" />
+    <input type="text" id="dest-input" placeholder="Destination (e.g. Koramangala)" />
+    <button id="find-route-btn">Find Route</button>
+  </div>
+  <div id="route-selector">
+    <div class="route-chip active" id="chip-dynamic" data-route="500-D">🟢 Route 500-D</div>
+  </div>
 </div>
 
 <!-- Stats panel (right) -->
@@ -882,33 +944,136 @@ async function poll() {
 
 
 // ═══════════════════════════════════════════════════════════════════
-// ROUTE SELECTOR
+// METRO LINES
+// ═══════════════════════════════════════════════════════════════════
+async function loadMetroLines() {
+  try {
+    const res = await fetch('https://raw.githubusercontent.com/geohacker/namma-metro/master/metro-lines-stations.geojson');
+    const data = await res.json();
+    L.geoJSON(data, {
+      style: function(feature) {
+        // Namma Metro colors (Purple and Green lines)
+        const name = feature.properties.name || "";
+        if (name.toLowerCase().includes("purple")) return { color: "#800080", weight: 4, opacity: 0.8 };
+        if (name.toLowerCase().includes("green")) return { color: "#008000", weight: 4, opacity: 0.8 };
+        return { color: "#555", weight: 3, opacity: 0.5 };
+      },
+      // Optionally hide stations or display them as small dots
+      pointToLayer: function (feature, latlng) {
+        return L.circleMarker(latlng, {
+          radius: 3,
+          fillColor: "#fff",
+          color: "#000",
+          weight: 1,
+          opacity: 1,
+          fillOpacity: 0.8
+        });
+      }
+    }).addTo(map);
+  } catch (err) {
+    console.warn("Failed to load Metro GeoJSON", err);
+  }
+}
+loadMetroLines();
+
+// ═══════════════════════════════════════════════════════════════════
+// SEARCH / ROUTING LOGIC
 // ═══════════════════════════════════════════════════════════════════
 
-document.querySelectorAll('.route-chip').forEach(chip => {
-  chip.addEventListener('click', () => {
-    // Update active route
-    document.querySelectorAll('.route-chip').forEach(c => c.classList.remove('active'));
-    chip.classList.add('active');
-    activeRoute = chip.dataset.route;
+async function geocode(query) {
+  // Bounding box for Bangalore roughly: 77.4, 12.8 to 77.8, 13.1
+  const viewBox = "77.4,13.1,77.8,12.8";
+  const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&bounded=1&viewbox=${viewBox}`;
+  const res = await fetch(url, { headers: { "User-Agent": "BMTC-Tracker/1.0" } });
+  const data = await res.json();
+  if (data && data.length > 0) {
+    return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+  }
+  return null;
+}
 
-    // Update card footer
+document.getElementById('find-route-btn').addEventListener('click', async () => {
+  const originStr = document.getElementById('origin-input').value.trim();
+  const destStr = document.getElementById('dest-input').value.trim();
+  const btn = document.getElementById('find-route-btn');
+  
+  if (!originStr || !destStr) {
+    alert("Please enter both Origin and Destination");
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Geocoding...";
+
+  try {
+    const originCoords = await geocode(originStr);
+    const destCoords = await geocode(destStr);
+
+    if (!originCoords) {
+      alert(`Could not find location for: ${originStr}`);
+      return;
+    }
+    if (!destCoords) {
+      alert(`Could not find location for: ${destStr}`);
+      return;
+    }
+
+    btn.textContent = "Finding Route...";
+
+    // Ask backend for best route
+    const rtRes = await fetch(`${API_BASE}/api/v1/find-route?originLat=${originCoords.lat}&originLon=${originCoords.lon}&destLat=${destCoords.lat}&destLon=${destCoords.lon}`);
+    const rtData = await rtRes.json();
+
+    if (!rtData.route) {
+      alert(rtData.message || "No direct bus route found between these locations.");
+      btn.textContent = "Find Route";
+      btn.disabled = false;
+      return;
+    }
+
+    // Assign route and update UI
+    activeRoute = rtData.route;
+    
+    // Show active route chip
+    const rs = document.getElementById('route-selector');
+    rs.style.display = 'flex';
+    const dynChip = document.getElementById('chip-dynamic');
+    dynChip.textContent = `🟢 Route ${activeRoute}`;
+    dynChip.dataset.route = activeRoute;
+
     document.getElementById('footer-route').textContent = activeRoute;
 
-    // Clear bus markers so stale buses from the old route vanish
+    // Optional: add markers for origin/dest
+    // L.marker([originCoords.lat, originCoords.lon]).addTo(map).bindPopup("Origin");
+    // L.marker([destCoords.lat, destCoords.lon]).addTo(map).bindPopup("Destination");
+
+    // Center map roughly between origin and dest
+    map.fitBounds([
+      [originCoords.lat, originCoords.lon],
+      [destCoords.lat, destCoords.lon]
+    ], { padding: [50, 50] });
+
+    // Clear old buses
     Object.values(busMarkers).forEach(m => map.removeLayer(m));
     busMarkers = {};
 
     renderNoData();
-    poll();  // Immediate poll on route switch
-  });
+    poll(); // immediate poll
+
+  } catch (err) {
+    console.error("Search error:", err);
+    alert("An error occurred while finding the route.");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Find Route";
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════
 // START POLLING
 // ═══════════════════════════════════════════════════════════════════
 
-// Initial poll immediately
+// Initial poll automatically starts for activeRoute (500-D)
 poll();
 
 // Then every 15 seconds
@@ -923,6 +1088,7 @@ document.addEventListener('visibilitychange', () => {
     pollTimer = setInterval(poll, POLL_INTERVAL_MS);
   }
 });
+
 </script>
 </body>
 </html>
