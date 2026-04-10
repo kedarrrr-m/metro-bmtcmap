@@ -1,0 +1,28 @@
+services:
+  # 1. FastAPI Web Service
+  - type: web
+    name: bmtc-web
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: REDIS_URL
+        sync: false # User needs to set this manually using Render Secrets
+      - key: BMTC_API_URL
+        value: "https://nammabmtc.mobi/api/buslocations"
+      - key: POLL_INTERVAL_SECONDS
+        value: "30"
+
+  # 2. Background Poller Worker
+  - type: worker
+    name: bmtc-poller
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python poller.py"
+    envVars:
+      - key: REDIS_URL
+        sync: false
+      - key: BMTC_API_URL
+        value: "https://nammabmtc.mobi/api/buslocations"
+      - key: POLL_INTERVAL_SECONDS
+        value: "30"
