@@ -1,0 +1,37 @@
+name: BMTC Poller
+
+on:
+  schedule:
+    # Runs every 5 minutes — the minimum GitHub Actions allows.
+    # GitHub Actions gives 2,000 free minutes/month on public repos
+    # (unlimited on public repos). 5-min cadence = ~8,640 runs/month,
+    # each run takes ~10 seconds → ~1,440 minutes/month. Stays free.
+    - cron: '*/5 * * * *'
+
+  # Allow manual trigger from the GitHub Actions UI for testing
+  workflow_dispatch:
+
+jobs:
+  poll:
+    name: Fetch BMTC Bus Positions
+    runs-on: ubuntu-latest
+    timeout-minutes: 2  # Kill if it hangs — should finish in ~10 seconds
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'  # Cache pip deps between runs — faster startup
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run poller (single pass)
+        env:
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          BMTC_API_URL: ${{ secrets.BMTC_API_URL }}
+        run: python poller.py
